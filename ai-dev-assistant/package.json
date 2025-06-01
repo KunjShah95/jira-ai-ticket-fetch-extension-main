@@ -1,0 +1,182 @@
+{
+  "name": "ai-dev-assistant",
+  "displayName": "AI Development Assistant",
+  "description": "AI-powered assistant that automates the software development lifecycle with Jira integration",
+  "version": "0.1.0",
+  "publisher": "void-editor",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiDevAssistant.dashboard.focus",
+        "title": "Focus Dashboard",
+        "category": "AI Dev Assistant",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "aiDevAssistant.openFrontend",
+        "title": "Open AI Dev Assistant Frontend",
+        "category": "AI Dev Assistant",
+        "icon": "$(browser)"
+      },
+      {
+        "command": "aiDevAssistant.configureJira",
+        "title": "Configure Jira Connection",
+        "category": "AI Dev Assistant",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "aiDevAssistant.startWorkflow",
+        "title": "Start Development Workflow",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.viewProgress",
+        "title": "View Development Progress",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.jiraToGitHubFlow",
+        "title": "Jira Ticket → Code → GitHub (End-to-End)",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.retryWorkflow",
+        "title": "Retry Development Workflow",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.restoreBackup",
+        "title": "Restore Backup",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.generateCodeForTask",
+        "title": "Generate Code for Task",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.syncJiraTasks",
+        "title": "Sync Jira Tasks",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.runTests",
+        "title": "Run Tests",
+        "category": "AI Dev Assistant"
+      },
+      {
+        "command": "aiDevAssistant.reviewCode",
+        "title": "Review Code",
+        "category": "AI Dev Assistant"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ai-dev-assistant",
+          "title": "AI Dev Assistant",
+          "icon": "$(tools)"
+        }
+      ]
+    },
+    "views": {
+      "ai-dev-assistant": [
+        {
+          "id": "aiDevAssistant.dashboard",
+          "name": "Dashboard",
+          "icon": "$(dashboard)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "aiDevAssistant.dashboard",
+        "contents": "Access the AI Dev Assistant frontend dashboard to manage your development workflows.\n[Open Frontend](command:aiDevAssistant.openFrontend)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aiDevAssistant.openFrontend",
+          "when": "view == aiDevAssistant.dashboard",
+          "group": "navigation",
+          "icon": "$(browser)"
+        },
+        {
+          "command": "aiDevAssistant.configureJira",
+          "when": "view == aiDevAssistant.dashboard",
+          "group": "navigation",
+          "icon": "$(gear)"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "AI Development Assistant",
+      "properties": {
+        "aiDevAssistant.jira.instanceUrl": {
+          "type": "string",
+          "description": "Jira instance URL (e.g., https://yourcompany.atlassian.net)",
+          "default": "https://yorkhackathonteam8.atlassian.net",
+          "scope": "window"
+        },
+        "aiDevAssistant.llm.provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "azure-openai"
+          ],
+          "default": "openai",
+          "description": "LLM provider for code generation",
+          "scope": "window"
+        },
+        "aiDevAssistant.git.autoCreateBranches": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically create feature branches for Jira tasks",
+          "scope": "window"
+        },
+        "aiDevAssistant.testing.autoRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run tests after code generation",
+          "scope": "window"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/eslint": "^9.6.1",
+    "@types/node": "16.x",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.100.0",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.9.0",
+    "axios": "^1.6.0",
+    "jsonwebtoken": "^9.0.2",
+    "openai": "^4.24.0",
+    "simple-git": "^3.20.0",
+    "uuid": "^9.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/void-editor/ai-dev-assistant.git"
+  }
+}

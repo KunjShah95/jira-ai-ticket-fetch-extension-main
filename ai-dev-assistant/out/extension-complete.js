@@ -1,0 +1,484 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getExtensionContext = exports.deactivate = exports.activate = void 0;
+const vscode = __importStar(require("vscode"));
+const orchestrationService_1 = require("./services/orchestrationService");
+const jiraService_1 = require("./services/jiraService");
+const llmService_1 = require("./services/llmService");
+const gitService_1 = require("./services/gitService");
+const testingService_1 = require("./services/testingService");
+const progressTrackingService_1 = require("./services/progressTrackingService");
+const webhookService_1 = require("./services/webhookService");
+const notificationService_1 = require("./services/notificationService");
+const backupService_1 = require("./services/backupService");
+const validationService_1 = require("./services/validationService");
+const configurationManager_1 = require("./utils/configurationManager");
+const logger_1 = require("./utils/logger");
+const errorHandler_1 = require("./utils/errorHandler");
+// Global extension context for services to access
+let extensionContext;
+function activate(context) {
+    // Store extension context globally
+    extensionContext = context;
+    // Initialize logger and error handler first
+    const logger = logger_1.Logger.getInstance();
+    const errorHandler = errorHandler_1.ErrorHandler.getInstance();
+    logger.info('Activating AI Development Assistant extension', 'Extension');
+    try {
+        // Initialize configuration manager
+        const configManager = configurationManager_1.ConfigurationManager.getInstance();
+        // Initialize core services
+        const jiraService = new jiraService_1.JiraService();
+        const llmService = new llmService_1.LLMService();
+        const gitService = new gitService_1.GitService();
+        const testingService = new testingService_1.TestingService();
+        const progressService = new progressTrackingService_1.ProgressTrackingService();
+        // Initialize additional services
+        const webhookService = new webhookService_1.WebhookService();
+        const notificationService = new notificationService_1.NotificationService();
+        const backupService = new backupService_1.BackupService();
+        // Initialize orchestration service with all dependencies
+        const orchestrationService = new orchestrationService_1.OrchestrationService(jiraService, llmService, gitService, testingService, progressService);
+        // Setup event handling
+        setupEventHandlers(orchestrationService, jiraService, progressService, webhookService, notificationService, logger);
+        // Register commands
+        registerCommands(context, orchestrationService, jiraService, llmService, gitService, testingService, progressService, configManager, backupService);
+        // Initialize webhooks (async)
+        initializeWebhooks(webhookService, orchestrationService, logger);
+        // Schedule periodic tasks
+        schedulePeriodicTasks(backupService, jiraService, logger);
+        // Add disposables
+        context.subscriptions.push(progressService, webhookService, notificationService);
+        logger.info('AI Development Assistant extension activated successfully', 'Extension');
+    }
+    catch (error) {
+        const errorMessage = errorHandler.handleError(error, 'Extension Activation');
+        vscode.window.showErrorMessage(`Failed to activate AI Development Assistant: ${errorMessage}`);
+        throw error;
+    }
+}
+exports.activate = activate;
+function deactivate() {
+    const logger = logger_1.Logger.getInstance();
+    logger.info('AI Development Assistant extension deactivated', 'Extension');
+}
+exports.deactivate = deactivate;
+function setupEventHandlers(orchestrationService, jiraService, _progressService, webhookService, notificationService, logger) {
+    // Listen for workflow events
+    orchestrationService.addEventListener((event) => {
+        if (event.type === 'started') {
+            logger.info(`Workflow ${event.workflowId} started`, 'Workflow');
+            notificationService.showNotification({
+                type: 'info',
+                title: 'Workflow Started',
+                message: `Started processing Jira task: ${event.stepId}`
+            });
+        }
+        else if (event.type === 'step-completed') {
+            logger.info(`Workflow ${event.workflowId} step ${event.stepId} completed`, 'Workflow');
+        }
+        else if (event.type === 'step-failed') {
+            logger.error(`Workflow ${event.workflowId} step ${event.stepId} failed: ${event.error}`, 'Workflow');
+            notificationService.showNotification({
+                type: 'error',
+                title: 'Workflow Step Failed',
+                message: event.error || 'Unknown error'
+            });
+        }
+        else if (event.type === 'completed') {
+            logger.info(`Workflow ${event.workflowId} completed`, 'Workflow');
+            notificationService.showNotification({
+                type: 'info',
+                title: 'Workflow Completed',
+                message: 'Task has been processed successfully'
+            });
+        }
+        else if (event.type === 'failed') {
+            logger.error(`Workflow ${event.workflowId} failed: ${event.error}`, 'Workflow');
+            notificationService.showNotification({
+                type: 'error',
+                title: 'Workflow Failed',
+                message: event.error || 'Unknown error'
+            });
+        }
+    });
+    // Setup webhook event handlers
+    webhookService.on('jiraTaskCreated', async (payload) => {
+        logger.info('Jira task created webhook received', 'Webhook');
+        try {
+            const task = await jiraService.getTask(payload.issue.key);
+            if (task) {
+                await orchestrationService.startDevelopmentWorkflow(payload.issue.key);
+            }
+        }
+        catch (error) {
+            logger.error(`Failed to process Jira task created webhook: ${error}`, 'Webhook');
+        }
+    });
+    webhookService.on('jiraTaskUpdated', async (_payload) => {
+        logger.info('Jira task updated webhook received', 'Webhook');
+        // Handle task updates if needed
+    });
+    webhookService.on('gitPrMerged', async (_payload) => {
+        logger.info('Git PR merged webhook received', 'Webhook');
+        // Handle PR merge events if needed
+    });
+}
+function registerCommands(context, orchestrationService, jiraService, llmService, _gitService, testingService, progressService, configManager, backupService) {
+    const logger = logger_1.Logger.getInstance();
+    const errorHandler = errorHandler_1.ErrorHandler.getInstance();
+    // Main workflow commands
+    const commands = [
+        vscode.commands.registerCommand('aiDevAssistant.configureJira', async () => {
+            try {
+                await configureJiraConnection(jiraService, configManager);
+                vscode.window.showInformationMessage('Jira configuration completed successfully');
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Jira Configuration');
+                vscode.window.showErrorMessage(`Jira configuration failed: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.startWorkflow', async () => {
+            try {
+                const taskKey = await promptForJiraTaskKey();
+                if (taskKey) {
+                    const task = await jiraService.getTask(taskKey);
+                    if (task) {
+                        await orchestrationService.startDevelopmentWorkflow(taskKey);
+                        vscode.window.showInformationMessage(`Workflow started for task ${taskKey}`);
+                    }
+                    else {
+                        vscode.window.showErrorMessage(`Task ${taskKey} not found`);
+                    }
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Start Workflow');
+                vscode.window.showErrorMessage(`Failed to start workflow: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.viewProgress', async () => {
+            try {
+                await viewProgressDashboard(progressService);
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'View Progress');
+                vscode.window.showErrorMessage(`Failed to view progress: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.retryWorkflow', async () => {
+            try {
+                const workflowId = await selectWorkflowForRetry(progressService);
+                if (workflowId) {
+                    const workflow = await progressService.getWorkflow(workflowId);
+                    const failedStep = workflow.steps.find(step => step.status === 'failed');
+                    if (failedStep) {
+                        await orchestrationService.retryFailedStep(workflowId, failedStep.id);
+                        vscode.window.showInformationMessage(`Workflow ${workflowId} retry initiated`);
+                    }
+                    else {
+                        vscode.window.showWarningMessage(`No failed steps found in workflow ${workflowId}`);
+                    }
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Retry Workflow');
+                vscode.window.showErrorMessage(`Failed to retry workflow: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.cancelWorkflow', async () => {
+            try {
+                const workflowId = await selectWorkflowForCancellation(progressService);
+                if (workflowId) {
+                    await orchestrationService.cancelWorkflow(workflowId);
+                    vscode.window.showInformationMessage(`Workflow ${workflowId} cancelled`);
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Cancel Workflow');
+                vscode.window.showErrorMessage(`Failed to cancel workflow: ${errorMessage}`);
+            }
+        }),
+        // Individual service commands
+        vscode.commands.registerCommand('aiDevAssistant.syncJiraTasks', async () => {
+            try {
+                await jiraService.getTasks();
+                vscode.window.showInformationMessage('Jira tasks synced successfully');
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Sync Jira Tasks');
+                vscode.window.showErrorMessage(`Failed to sync Jira tasks: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.generateCode', async () => {
+            try {
+                const taskKey = await promptForJiraTaskKey();
+                if (taskKey) {
+                    const task = await jiraService.getTask(taskKey);
+                    if (task) {
+                        const codeResult = await llmService.generateCode({
+                            task: task,
+                            context: {},
+                            requirements: task.description,
+                            fileType: 'component'
+                        });
+                        if (codeResult && codeResult.files.length > 0) {
+                            const code = codeResult.files[0].content;
+                            await vscode.workspace.openTextDocument({ content: code, language: 'typescript' });
+                            vscode.window.showInformationMessage('Code generated successfully');
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Generate Code');
+                vscode.window.showErrorMessage(`Failed to generate code: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.runTests', async () => {
+            try {
+                const results = await testingService.runTests();
+                if (results.success) {
+                    vscode.window.showInformationMessage(`Tests passed: ${results.testResults.passed}/${results.testResults.total}`);
+                }
+                else {
+                    vscode.window.showErrorMessage(`Tests failed: ${results.testResults.failed}/${results.testResults.total}`);
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Run Tests');
+                vscode.window.showErrorMessage(`Test execution failed: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.reviewCode', async () => {
+            try {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (activeEditor) {
+                    const code = activeEditor.document.getText();
+                    const review = await llmService.reviewCode(code, activeEditor.document.languageId);
+                    if (review) {
+                        vscode.window.showInformationMessage('Code review completed - check output panel');
+                    }
+                }
+                else {
+                    vscode.window.showWarningMessage('No active editor found');
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Review Code');
+                vscode.window.showErrorMessage(`Code review failed: ${errorMessage}`);
+            }
+        }),
+        // Configuration and maintenance commands
+        vscode.commands.registerCommand('aiDevAssistant.validateConfig', async () => {
+            try {
+                const result = await (0, validationService_1.validateCredentials)();
+                if (result.isValid) {
+                    vscode.window.showInformationMessage('Configuration is valid');
+                }
+                else {
+                    vscode.window.showWarningMessage('Configuration validation failed - check output panel');
+                }
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Validate Configuration');
+                vscode.window.showErrorMessage(`Configuration validation failed: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.backupData', async () => {
+            try {
+                await backupService.createBackup('full', 'Manual backup via command');
+                vscode.window.showInformationMessage('Backup created successfully');
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Create Backup');
+                vscode.window.showErrorMessage(`Failed to create backup: ${errorMessage}`);
+            }
+        }),
+        vscode.commands.registerCommand('aiDevAssistant.restoreData', async () => {
+            try {
+                // Fix: Use correct property for workflow selection (jiraTask.key) and status 'in-progress'
+                const activeWorkflows = (await progressService.getActiveWorkflows()).filter(w => w.status === 'in-progress');
+                const selectedCancel = await vscode.window.showQuickPick(activeWorkflows.map(w => ({ label: w.id, description: w.jiraTask.key })), { placeHolder: 'Select workflow to cancel' });
+                return selectedCancel?.label;
+            }
+            catch (error) {
+                const errorMessage = errorHandler.handleError(error, 'Restore Data');
+                vscode.window.showErrorMessage(`Failed to restore data: ${errorMessage}`);
+            }
+        })
+    ];
+    // Add all commands to subscriptions
+    commands.forEach(command => context.subscriptions.push(command));
+}
+async function configureJiraConnection(jiraService, configManager) {
+    const logger = logger_1.Logger.getInstance();
+    // Get Jira instance URL
+    const instanceUrl = await vscode.window.showInputBox({
+        prompt: 'Enter your Jira instance URL',
+        placeHolder: 'https://your-company.atlassian.net',
+        validateInput: (value) => {
+            if (!value || !value.startsWith('http')) {
+                return 'Please enter a valid URL';
+            }
+            return null;
+        }
+    });
+    if (!instanceUrl)
+        return;
+    // Start OAuth flow
+    logger.info('Starting Jira OAuth configuration', 'Configuration');
+    const success = await jiraService.authenticate();
+    if (success) {
+        // Fix: Use updateJiraConfig instead of setConfiguration
+        await configManager.updateJiraConfig({ instanceUrl });
+        logger.info('Jira configuration completed successfully', 'Configuration');
+    }
+    else {
+        throw new Error('OAuth authentication failed');
+    }
+}
+async function promptForJiraTaskKey() {
+    return await vscode.window.showInputBox({
+        prompt: 'Enter Jira task key (e.g., PROJ-123)',
+        validateInput: (value) => {
+            if (!value || !/^[A-Z]+-\d+$/.test(value)) {
+                return 'Please enter a valid Jira task key (e.g., PROJ-123)';
+            }
+            return null;
+        }
+    });
+}
+async function viewProgressDashboard(progressService) {
+    const panel = vscode.window.createWebviewPanel('aiDevAssistantProgress', 'AI Dev Assistant - Progress Dashboard', vscode.ViewColumn.One, {
+        enableScripts: true,
+        retainContextWhenHidden: true
+    });
+    // Fix: Use correct async/await for workflows and dashboard
+    panel.webview.html = generateProgressDashboardHtml(await progressService.getActiveWorkflows());
+    panel.webview.onDidReceiveMessage(async (message) => {
+        switch (message.command) {
+            case 'refresh':
+                const refreshedWorkflows = await progressService.getActiveWorkflows();
+                panel.webview.html = generateProgressDashboardHtml(refreshedWorkflows);
+                break;
+            case 'cancelWorkflow':
+                // Handle workflow cancellation
+                break;
+        }
+    });
+}
+function generateProgressDashboardHtml(workflows) {
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>AI Dev Assistant Progress</title>
+      <style>
+        body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); }
+        .workflow { margin: 10px 0; padding: 10px; border: 1px solid var(--vscode-panel-border); }
+        .step { margin: 5px 0; padding: 5px; }
+        .completed { background-color: var(--vscode-charts-green); }
+        .failed { background-color: var(--vscode-charts-red); }
+        .running { background-color: var(--vscode-charts-yellow); }
+      </style>
+    </head>
+    <body>
+      <h1>Active Workflows</h1>
+      ${workflows.map(workflow => `
+        <div class="workflow">
+          <h3>Workflow: ${workflow.id}</h3>
+          <p>Task: ${workflow.jiraTask?.key ?? ''}</p>
+          <p>Status: ${workflow.status}</p>
+          <div class="steps">
+            ${workflow.steps.map((step) => `
+              <div class="step ${step.status}">
+                ${step.name}: ${step.status}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+      <script>
+        const vscode = acquireVsCodeApi();
+        function refresh() { vscode.postMessage({command: 'refresh'}); }
+        setInterval(refresh, 5000); // Auto-refresh every 5 seconds
+      </script>
+    </body>
+    </html>
+  `;
+}
+async function selectWorkflowForRetry(progressService) {
+    // Fix: Use correct property for workflow selection (jiraTask.key)
+    const failedWorkflows = (await progressService.getAllWorkflows()).filter(w => w.status === 'failed');
+    const selected = await vscode.window.showQuickPick(failedWorkflows.map(w => ({ label: w.id, description: w.jiraTask.key })), { placeHolder: 'Select workflow to retry' });
+    return selected?.label;
+}
+async function selectWorkflowForCancellation(progressService) {
+    // Fix: Use correct property for workflow selection (jiraTask.key) and status 'in-progress'
+    const activeWorkflows = (await progressService.getActiveWorkflows()).filter(w => w.status === 'in-progress');
+    const selectedCancel = await vscode.window.showQuickPick(activeWorkflows.map(w => ({ label: w.id, description: w.jiraTask.key })), { placeHolder: 'Select workflow to cancel' });
+    return selectedCancel?.label;
+}
+function schedulePeriodicTasks(backupService, jiraService, logger) {
+    // Schedule daily backup
+    setInterval(async () => {
+        try {
+            // Fix: createBackup requires at least two arguments for scheduled backup
+            await backupService.createBackup('full', 'Scheduled backup');
+            logger.info('Scheduled backup completed', 'Backup');
+        }
+        catch (error) {
+            logger.error(`Scheduled backup failed: ${error}`, 'Backup');
+        }
+    }, 24 * 60 * 60 * 1000); // 24 hours
+    // Schedule configuration validation every hour
+    setInterval(async () => {
+        try {
+            await (0, validationService_1.validateCredentials)();
+            logger.debug('Scheduled configuration validation completed', 'Validation');
+        }
+        catch (error) {
+            logger.error(`Scheduled configuration validation failed: ${error}`, 'Validation');
+        }
+    }, 60 * 60 * 1000); // 1 hour
+}
+async function initializeWebhooks(webhookService, orchestrationService, logger) {
+    try {
+        await webhookService.initialize();
+        logger.info('Webhooks initialized successfully', 'Webhook');
+    }
+    catch (error) {
+        logger.error(`Failed to initialize webhooks: ${error}`, 'Webhook');
+    }
+}
+// Export the extension context getter for services
+function getExtensionContext() {
+    return extensionContext;
+}
+exports.getExtensionContext = getExtensionContext;
+//# sourceMappingURL=extension-complete.js.map
