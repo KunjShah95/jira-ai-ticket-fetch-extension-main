@@ -1,0 +1,44 @@
+# filepath: d:\void\backend\python-server\docker-compose.yml
+version: "3.8"
+
+services:
+  python-server:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LLM_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=["http://localhost:3000", "http://localhost:3001"]
+    volumes:
+      - ./generated_code:/app/generated_code
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
